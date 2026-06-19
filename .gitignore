@@ -1,2 +1,3 @@
-helper_agent/.env
-Math_Instructor_Agent/.env
+.env
+*.env
+**/.env
