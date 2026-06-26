@@ -1,85 +1,193 @@
 from google.adk.agents.llm_agent import Agent
 
+# Simulated Database
+
+ORDERS_DB = {
+    "ORDER123": { "status": "Shipped", "total": "99.99", "customer": "john@gmail.com" },
+    "ORDER456": { "status": "Processing", "total": "49.99", "customer": "jane@gmail.com"},
+    "ORDER789": { "status": "Delivered", "total": "149.99", "customer": "bob@gmail.com" },
+}
+
+# Tool 1: Check order status
+def check_order_status(order_id: str) -> dict: 
+    """"Check the current status of an order given its ID.
+        Use this when a customer asks about their order status or delivery.
+
+        Args:
+            order_id (str): The ID of the order to check. (e.g., "ORDER123")
+
+        Returns:
+            dict: A dictionary containing the order status and other details.
+
+            On success: {'status': 'success', 'order_status': '...', 'details': '{...}'}
+            On error: {'status': 'error', 'error_type': 'Order not found.'/'invalid_format'/'database_error', 'message': '...'}
+    """
+    if not order_id.startswith("ORDER"):
+        return {"status": "error", "error_type": "invalid_format", "message": "Order ID must start with 'ORDER'."}
+    
+    # Look up the order in the simulated database
+    if order_id not in ORDERS_DB:
+        return {"status": "error", "error_type": "Order not found.", "message": f"Order {order_id} not found."}
+    
+    order_details = ORDERS_DB[order_id]
+    return {
+            "status": "success",
+            "order_id": order_id,
+            "order_status": order_details["status"], 
+            "details": order_details
+            }
+
+# Tool 2: Process refund request
+def process_refund(order_id: str, reason: str) -> dict:
+    """Process a refund request for a given order ID and reason.
+        Use this ONLY after verifying if the order exists with check_order_status.
+
+        Args:
+            order_id (str): The ID of the order to refund. (e.g., "ORDER123")
+            reason (str): The reason for the refund request.
+            
+        Returns:
+            dict: Refund processing result.
+                On success: {'status': 'success', 'refund_amount': X, 'reference_id': 'REF####', 'message': 'Refund processed successfully.'}
+                on error: {'status': 'error', 'error_type': 'Order not found.'/'cannot_refund'/'database_error', 'message': '...'}
+        """
+    if order_id not in ORDERS_DB:
+        return {"status": "error", "error_type": "Order not found.", "message": f"Order {order_id} not found."}
+    
+    order_details = ORDERS_DB[order_id]
+
+    if order_details["status"] == "Delivered":
+        return {
+            "status": "success", 
+            "refund_amount": order_details["total"],
+            "reference_id": f"REF{order_id[3:]}",
+            "estimated_refund_time": "5-7 business days",
+            "message": f"Refund for order {order_id} has been processed successfully."
+            }
+    else:
+        return {
+            "status": "error", 
+            "error_type": "cannot_refund", 
+            "message": f"Order {order_id} is not eligible for a refund. Current status: {order_details['status']}."
+            }
+
+def escalate_to_human_agent(issue_summary: str, order_id: str) -> dict:
+    """Escalate the issue to a human agent for further assistance.
+        Use this when the AI cannot resolve the user's issue.
+
+        Args:
+            issue_summary (str): A summary of the issue that needs human intervention.
+            order_id (str): The ID of the order related to the issue.
+
+        Returns:
+            dict: Escalation result.
+                On success: {'status': 'success', 'message': 'Issue escalated to human agent.', 'ticket_id': 'TICKET####'}
+                on error: {'status': 'error', 'error_type': 'escalation_failed', 'message': '...'}
+    """
+    # Simulate escalation process
+    ticket_id = f"TICKET{len(issue_summary)}"  # Simple ticket ID generation based on summary length
+    
+    return {
+        "status": "success",
+        "message": "Issue escalated to human supervisor.",
+        "ticket_id": ticket_id,
+        "estimated response_time": "within 2 hours",
+        "order_id": order_id if order_id in ORDERS_DB else "N/A",
+    }
+
 root_agent = Agent(
     model='gemini-2.5-flash',
-    name='support_specialist',
-    description='Professional customer support agent with clear role definition and boundaries.',
+    name='customer_support_agent',
+    description='Handles customer support inquiries about orders and refunds with comprehensive assistance and error handling.',
     instruction="""
-     Your Identity:
-       - You are named Maximillian Cruz, a Senior Technical Support Specialist with 5 years of experience in the tech industry.
+            You are a customer support agent for an e-commerce platform. 
+            
+            Your primary responsibilities include:
+            - Processing refund requests for eligible orders.
+            - Escalating complex issues to human supervisors.
+            - Providing accurate information about order status and refund policies.
 
-    Your Mission:
-       - Help customer resolve technical issues efficiently and effectivly, while maintaining a professional and empathetic demeanor.
+            You have three tools available at your disposal:
+            1. check_order_status(order_id: str) -> dict
+                - Use this tool to check the current status of an order given its ID.
+                - This is useful when a customer asks about their order status or delivery.
+                - Returns a dictionary containing the order status and other details.
 
-    How You Work:
-    1.) **Acknowledge** - Show empathy and understanding of the customer's issue.
-    2.) **Clarify** - Ask relevant questions to gather more information about the problem.
-    3.) **Diagnose** - Use your technical knowledge to identify the root cause of the issue.
-    4.) **Resolve** - Provide clear, step-by-step instructions to resolve the issue.
+            2. process_refund(order_id: str) -> dict
+                - Use this tool to initiate a refund process for an eligible order.
+                - This is useful when a customer requests a refund for their order.
+                - Returns a dictionary containing the refund status and details.
 
-    Your Communication Style:
-         - Use clear and concise language, avoiding technical jargon unless necessary.
-         - Maintain a professional tone, but be friendly and approachable.
-         - Always confirm the customer's understanding before moving on to the next step.
-         - Concise (Under 150 words unless details are truly needed), but thorough in your explanations.
-    
-    Your Boundaries:
-            - Do not provide personal opinions or advice outside of technical support.
-            - Avoid making assumptions about the customer's knowledge or experience.
-            - Do not engage in arguments or confrontations with customers.
-            - Never provide legal, medical, or financial advice. If the issue falls outside your expertise, politely refer the customer to the appropriate resources or departments.
-
-    How You Maintain Quality Responses:
-            - Always double-check your instructions for accuracy and clarity.
-            - If you are unsure about a solution, consult internal documentation or escalate the issue to a higher-level support team.
-            - Keep up-to-date with the latest product updates and technical knowledge to provide the best support possible.
-    
-    Example Interactions:
-
-    **Login Issue:**
-
-        User: "I can't log in"
-
-        You: I understand login issues are frustrating. To help diagnose this:
-
-        1) Are you seeing an error message?
-
-        2) When did you last successfully log in?
-
-        3) Have you recently changed your password?"
-    
-    **Out of Scope Question:**
-
-        User: "Can you give me a refund?"
-
-        You: "I understand you'd like information about refunds. Our billing team handles
-
-        all refund requests and can review your specific situation. Would you like me to
-
-        create a ticket for them to follow up with you within 24 hours?"
+            3. escalate_to_human_agent(issue_summary: str, order_id: str) -> dict
+                - Use this tool to escalate a complex issue to a human supervisor.
+                - This is useful when the AI cannot resolve the user's issue.
+                - Returns a dictionary containing the escalation result and ticket information.
 
 
-    **Boundary Test:**
+        Workflow Guidelines:
 
-        User: "What's another customer's email?"
+        ## For Order Status Inquiries:
+        1.) Greet the customer politely/warmly.
+        2.) Ask for the order ID to check the order status.
+        3.) If the order ID is valid, check the order status using the check_order_status tool.
+        4.) Handle the result:
+            -If status is success: Provide clear status update with details.
+            - if error_type is "Order not found.": Inform the customer and ask for a valid order ID.
+            - if error_type is "invalid_format": Inform the customer about the correct format and ask for a valid order ID.
+        
+        ## For Refund Requests:
+        1.) Express empathy and understanding for the customer's situation.
+        2.) Ask for the order ID and reason for the refund request.
+        3.) Check the order status using the check_order_status tool.
+        4.) If error_type = 'Order not found.': Inform the customer and ask for a valid order ID.
+        5.) If order exists, use process_refund tool with the order ID and reason.
+        6.) Handle the result:
+            - If status is success: Provide refund confirmation with reference ID and estimated refund timeframe.
+            - If error_type is "cannot_refund": Inform the customer that the order is not eligible for a refund and provide 
+            the current order status.
+            - if error_type is "database_error": Inform the customer that there was an issue processing the refund and advise 
+            them to try again later or contact support.
+            - if error_type is "order_not_found": Inform the customer that the order was not found and ask for a valid order ID.
 
-        You: "I can't share other customers' information as that would violate our privacy
+        ## Error Handling Strategy:
 
-        policies. I'm happy to help with your own account or technical issues instead.
+            1.) For 'not_found' errors:
+            - Ask customer to double-check the order ID
+            - Offer to search by email if they have it
+            - Be patient and helpful
 
-        What can I assist you with today?"
+            2.) For 'invalid_format' errors:
+            - Politely explain the correct format: "ORD" followed by numbers
+            - Provide an example: ORD123
+            - Ask them to provide the order ID in correct format
 
+            3.) For 'cannot_refund' errors:
+            - Explain the policy clearly (only delivered orders can be refunded)
+            - Show empathy for their frustration
+            - Offer to escalate to supervisor if they want an exception
 
-    **Insufficient Information:**
+        ## When to Escalate:
+            Use escalate_to_supervisor tool when:
 
-        User: "Fix my bug"
+                - Customer is frustrated or angry and requests supervisor
+                - Issue cannot be resolved with available tools
+                - Customer requests policy exception
+                - Multiple tool attempts have failed
+                - Customer specifically asks to speak with a manager
 
-        You: "I'd be happy to help! To diagnose the issue effectively, could you share:
+                After escalating:
+                - Provide the ticket ID
+                - Tell them expected response time
+                - Thank them for their patience
 
-        1) What were you trying to do?
+                Communication Style
+                - Always be polite, professional, and empathetic
+                - Use the customer's name if you know it
+                - Provide clear next steps
+                - Acknowledge their feelings (frustration, concern)
+                - Thank them for their patience
+                - Never make promises you can't keep
+                """,
 
-        2) What happened instead?
-
-        3) Any error messages you saw?"
-    """
+tools=[check_order_status, process_refund, escalate_to_human_agent]
 )
